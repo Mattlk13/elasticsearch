@@ -1,33 +1,30 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License;
- * you may not use this file except in compliance with the Elastic License.
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
  */
 
 package org.elasticsearch.xpack.transform.transforms;
 
-import org.elasticsearch.client.Client;
+import org.elasticsearch.client.ParentTaskAssigningClient;
+import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.xpack.core.indexing.IndexerState;
 import org.elasticsearch.xpack.core.transform.transforms.TransformCheckpoint;
 import org.elasticsearch.xpack.core.transform.transforms.TransformConfig;
 import org.elasticsearch.xpack.core.transform.transforms.TransformIndexerPosition;
 import org.elasticsearch.xpack.core.transform.transforms.TransformIndexerStats;
 import org.elasticsearch.xpack.core.transform.transforms.TransformProgress;
+import org.elasticsearch.xpack.transform.TransformServices;
 import org.elasticsearch.xpack.transform.checkpoint.CheckpointProvider;
-import org.elasticsearch.xpack.transform.checkpoint.TransformCheckpointService;
-import org.elasticsearch.xpack.transform.notifications.TransformAuditor;
 import org.elasticsearch.xpack.transform.persistence.SeqNoPrimaryTermAndIndex;
-import org.elasticsearch.xpack.transform.persistence.TransformConfigManager;
 
 import java.util.Map;
-import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
 class ClientTransformIndexerBuilder {
-    private Client client;
-    private TransformConfigManager transformsConfigManager;
-    private TransformCheckpointService transformsCheckpointService;
-    private TransformAuditor auditor;
+    private ParentTaskAssigningClient parentTaskClient;
+    private TransformServices transformServices;
     private Map<String, String> fieldMappings;
     private TransformConfig transformConfig;
     private TransformIndexerStats initialStats;
@@ -43,18 +40,17 @@ class ClientTransformIndexerBuilder {
         this.initialStats = new TransformIndexerStats();
     }
 
-    ClientTransformIndexer build(Executor executor, TransformContext context) {
-        CheckpointProvider checkpointProvider = transformsCheckpointService.getCheckpointProvider(transformConfig);
+    ClientTransformIndexer build(ThreadPool threadPool, TransformContext context) {
+        CheckpointProvider checkpointProvider = transformServices.getCheckpointService()
+            .getCheckpointProvider(parentTaskClient, transformConfig);
 
         return new ClientTransformIndexer(
-            executor,
-            transformsConfigManager,
+            threadPool,
+            transformServices,
             checkpointProvider,
-            new TransformProgressGatherer(client),
             new AtomicReference<>(this.indexerState),
             initialPosition,
-            client,
-            auditor,
+            parentTaskClient,
             initialStats,
             transformConfig,
             fieldMappings,
@@ -72,23 +68,13 @@ class ClientTransformIndexerBuilder {
         return this;
     }
 
-    ClientTransformIndexerBuilder setClient(Client client) {
-        this.client = client;
+    ClientTransformIndexerBuilder setClient(ParentTaskAssigningClient parentTaskClient) {
+        this.parentTaskClient = parentTaskClient;
         return this;
     }
 
-    ClientTransformIndexerBuilder setTransformsConfigManager(TransformConfigManager transformsConfigManager) {
-        this.transformsConfigManager = transformsConfigManager;
-        return this;
-    }
-
-    ClientTransformIndexerBuilder setTransformsCheckpointService(TransformCheckpointService transformsCheckpointService) {
-        this.transformsCheckpointService = transformsCheckpointService;
-        return this;
-    }
-
-    ClientTransformIndexerBuilder setAuditor(TransformAuditor auditor) {
-        this.auditor = auditor;
+    ClientTransformIndexerBuilder setTransformServices(TransformServices transformServices) {
+        this.transformServices = transformServices;
         return this;
     }
 

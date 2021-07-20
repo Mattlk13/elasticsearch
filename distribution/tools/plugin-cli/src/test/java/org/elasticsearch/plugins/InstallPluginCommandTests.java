@@ -1,20 +1,9 @@
 /*
- * Licensed to Elasticsearch under one or more contributor
- * license agreements. See the NOTICE file distributed with
- * this work for additional information regarding copyright
- * ownership. Elasticsearch licenses this file to you under
- * the Apache License, Version 2.0 (the "License"); you may
- * not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0 and the Server Side Public License, v 1; you may not use this file except
+ * in compliance with, at your election, the Elastic License 2.0 or the Server
+ * Side Public License, v 1.
  */
 
 package org.elasticsearch.plugins;
@@ -22,6 +11,7 @@ package org.elasticsearch.plugins;
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import com.google.common.jimfs.Configuration;
 import com.google.common.jimfs.Jimfs;
+
 import org.apache.lucene.util.LuceneTestCase;
 import org.bouncycastle.bcpg.ArmoredOutputStream;
 import org.bouncycastle.bcpg.BCPGOutputStream;
@@ -47,13 +37,13 @@ import org.elasticsearch.cli.ExitCodes;
 import org.elasticsearch.cli.MockTerminal;
 import org.elasticsearch.cli.Terminal;
 import org.elasticsearch.cli.UserException;
-import org.elasticsearch.common.SuppressForbidden;
-import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.hash.MessageDigests;
 import org.elasticsearch.common.io.FileSystemUtils;
-import org.elasticsearch.common.io.PathUtils;
-import org.elasticsearch.common.io.PathUtilsForTesting;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.core.PathUtils;
+import org.elasticsearch.core.PathUtilsForTesting;
+import org.elasticsearch.core.SuppressForbidden;
+import org.elasticsearch.core.Tuple;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.TestEnvironment;
 import org.elasticsearch.test.ESTestCase;
@@ -75,13 +65,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystem;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.GroupPrincipal;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributes;
@@ -106,6 +93,7 @@ import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import static org.elasticsearch.snapshots.AbstractSnapshotIntegTestCase.forEachFileRecursively;
 import static org.elasticsearch.test.hamcrest.RegexMatcher.matches;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -228,14 +216,10 @@ public class InstallPluginCommandTests extends ESTestCase {
     static Path writeZip(Path structure, String prefix) throws IOException {
         Path zip = createTempDir().resolve(structure.getFileName() + ".zip");
         try (ZipOutputStream stream = new ZipOutputStream(Files.newOutputStream(zip))) {
-            Files.walkFileTree(structure, new SimpleFileVisitor<Path>() {
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    String target = (prefix == null ? "" : prefix + "/") + structure.relativize(file).toString();
-                    stream.putNextEntry(new ZipEntry(target));
-                    Files.copy(file, stream);
-                    return FileVisitResult.CONTINUE;
-                }
+            forEachFileRecursively(structure, (file, attrs) -> {
+                String target = (prefix == null ? "" : prefix + "/") + structure.relativize(file).toString();
+                stream.putNextEntry(new ZipEntry(target));
+                Files.copy(file, stream);
             });
         }
         return zip;
@@ -303,12 +287,12 @@ public class InstallPluginCommandTests extends ESTestCase {
     }
 
     void assertPlugin(String name, Path original, Environment env) throws IOException {
-        assertPluginInternal(name, env.pluginsFile());
+        assertPluginInternal(name, env.pluginsFile(), original);
         assertConfigAndBin(name, original, env);
         assertInstallCleaned(env);
     }
 
-    void assertPluginInternal(String name, Path pluginsFile) throws IOException {
+    void assertPluginInternal(String name, Path pluginsFile, Path originalPlugin) throws IOException {
         Path got = pluginsFile.resolve(name);
         assertTrue("dir " + name + " exists", Files.exists(got));
 
@@ -327,7 +311,12 @@ public class InstallPluginCommandTests extends ESTestCase {
                 )
             );
         }
-        assertTrue("jar was copied", Files.exists(got.resolve("plugin.jar")));
+        try (Stream<Path> files = Files.list(originalPlugin).filter(p -> p.getFileName().toString().endsWith(".jar"))) {
+            files.forEach(file -> {
+                Path expectedJar = got.resolve(originalPlugin.relativize(file).toString());
+                assertTrue("jar [" + file.getFileName() + "] was copied", Files.exists(expectedJar));
+            });
+        }
         assertFalse("bin was not copied", Files.exists(got.resolve("bin")));
         assertFalse("config was not copied", Files.exists(got.resolve("config")));
     }
@@ -887,14 +876,14 @@ public class InstallPluginCommandTests extends ESTestCase {
         );
     }
 
-    private void installPlugin(MockTerminal terminal, boolean isBatch) throws Exception {
+    private void installPlugin(MockTerminal terminal, boolean isBatch, String... additionalProperties) throws Exception {
         Tuple<Path, Environment> env = createEnv(fs, temp);
         Path pluginDir = createPluginDir(temp);
         // if batch is enabled, we also want to add a security policy
         if (isBatch) {
             writePluginSecurityPolicy(pluginDir, "setFactory");
         }
-        String pluginZip = createPlugin("fake", pluginDir).toUri().toURL().toString();
+        String pluginZip = createPlugin("fake", pluginDir, additionalProperties).toUri().toURL().toString();
         skipJarHellCommand.execute(terminal, List.of(pluginZip), isBatch, env.v2());
     }
 
@@ -1478,7 +1467,7 @@ public class InstallPluginCommandTests extends ESTestCase {
     public void testPolicyConfirmation() throws Exception {
         Tuple<Path, Environment> env = createEnv(fs, temp);
         Path pluginDir = createPluginDir(temp);
-        writePluginSecurityPolicy(pluginDir, "setAccessible", "setFactory");
+        writePluginSecurityPolicy(pluginDir, "getClassLoader", "setFactory");
         String pluginZip = createPluginUrl("fake", pluginDir);
 
         assertPolicyConfirmation(env, pluginZip, "plugin requires additional permissions");
@@ -1492,5 +1481,15 @@ public class InstallPluginCommandTests extends ESTestCase {
 
         final IllegalStateException e = expectThrows(IllegalStateException.class, () -> installPlugin(pluginZip, env.v1()));
         assertThat(e, hasToString(containsString("plugins can not have native controllers")));
+    }
+
+    public void testMultipleJars() throws Exception {
+        Tuple<Path, Environment> env = createEnv(fs, temp);
+        Path pluginDir = createPluginDir(temp);
+        writeJar(pluginDir.resolve("dep1.jar"), "Dep1");
+        writeJar(pluginDir.resolve("dep2.jar"), "Dep2");
+        String pluginZip = createPluginUrl("fake-with-deps", pluginDir);
+        installPlugin(pluginZip, env.v1());
+        assertPlugin("fake-with-deps", pluginDir, env.v2());
     }
 }

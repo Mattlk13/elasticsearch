@@ -1,12 +1,13 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License;
- * you may not use this file except in compliance with the Elastic License.
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
  */
 
 package org.elasticsearch.xpack.analytics.topmetrics;
 
-import org.elasticsearch.common.ParseField;
+import org.elasticsearch.common.xcontent.ParseField;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.Writeable.Reader;
 import org.elasticsearch.common.xcontent.NamedXContentRegistry;
@@ -27,6 +28,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static java.util.Collections.singletonList;
+import static java.util.stream.Collectors.toList;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -68,9 +70,14 @@ public class TopMetricsAggregationBuilderTests extends AbstractSerializingTestCa
     protected TopMetricsAggregationBuilder createTestInstance() {
         List<SortBuilder<?>> sortBuilders = singletonList(
                 new FieldSortBuilder(randomAlphaOfLength(5)).order(randomFrom(SortOrder.values())));
-        MultiValuesSourceFieldConfig.Builder metricField = new MultiValuesSourceFieldConfig.Builder();
-        metricField.setFieldName(randomAlphaOfLength(5)).setMissing(1.0);
-        return new TopMetricsAggregationBuilder(randomAlphaOfLength(5), sortBuilders, metricField.build());
+        List<MultiValuesSourceFieldConfig> metricFields = InternalTopMetricsTests.randomMetricNames(between(1, 5)).stream()
+                .map(name -> {
+                    MultiValuesSourceFieldConfig.Builder metricField = new MultiValuesSourceFieldConfig.Builder();
+                    metricField.setFieldName(randomAlphaOfLength(5)).setMissing(1.0);
+                    return metricField.build();
+                })
+                .collect(toList());
+        return new TopMetricsAggregationBuilder(randomAlphaOfLength(5), sortBuilders, between(1, 100), metricFields);
     }
 
     public void testClientBuilder() throws IOException {
@@ -97,6 +104,7 @@ public class TopMetricsAggregationBuilderTests extends AbstractSerializingTestCa
         return new org.elasticsearch.client.analytics.TopMetricsAggregationBuilder(
                         serverBuilder.getName(),
                         serverBuilder.getSortBuilders().get(0),
-                        serverBuilder.getMetricField().getFieldName());
+                        serverBuilder.getSize(),
+                        serverBuilder.getMetricFields().stream().map(MultiValuesSourceFieldConfig::getFieldName).toArray(String[]::new));
     }
 }

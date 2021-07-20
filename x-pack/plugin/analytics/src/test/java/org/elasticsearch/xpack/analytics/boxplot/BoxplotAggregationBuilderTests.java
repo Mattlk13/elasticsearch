@@ -1,24 +1,24 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License;
- * you may not use this file except in compliance with the Elastic License.
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
  */
 
 package org.elasticsearch.xpack.analytics.boxplot;
 
+import org.elasticsearch.common.xcontent.ParseField;
 import org.elasticsearch.common.io.stream.Writeable;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.NamedXContentRegistry;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.search.SearchModule;
 import org.elasticsearch.search.aggregations.AggregatorFactories;
+import org.elasticsearch.search.aggregations.BaseAggregationBuilder;
 import org.elasticsearch.test.AbstractSerializingTestCase;
-import org.elasticsearch.xpack.analytics.AnalyticsPlugin;
 import org.junit.Before;
 
 import java.io.IOException;
-import java.util.Collections;
 
+import static java.util.Collections.singletonList;
 import static org.hamcrest.Matchers.hasSize;
 
 public class BoxplotAggregationBuilderTests extends AbstractSerializingTestCase<BoxplotAggregationBuilder> {
@@ -31,8 +31,10 @@ public class BoxplotAggregationBuilderTests extends AbstractSerializingTestCase<
 
     @Override
     protected NamedXContentRegistry xContentRegistry() {
-        SearchModule searchModule = new SearchModule(Settings.EMPTY, Collections.singletonList(new AnalyticsPlugin()));
-        return new NamedXContentRegistry(searchModule.getNamedXContents());
+        return new NamedXContentRegistry(singletonList(new NamedXContentRegistry.Entry(
+                BaseAggregationBuilder.class,
+                new ParseField(BoxplotAggregationBuilder.NAME),
+                (p, n) -> BoxplotAggregationBuilder.PARSER.apply(p, (String) n))));
     }
 
     @Override

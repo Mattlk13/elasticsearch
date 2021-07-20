@@ -1,7 +1,8 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License;
- * you may not use this file except in compliance with the Elastic License.
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
  */
 package org.elasticsearch.xpack.core.ml.job.persistence;
 
@@ -15,11 +16,13 @@ import org.elasticsearch.action.admin.indices.mapping.put.PutMappingAction;
 import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequest;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.cluster.ClusterState;
-import org.elasticsearch.cluster.metadata.AliasOrIndex;
-import org.elasticsearch.cluster.metadata.IndexMetaData;
-import org.elasticsearch.cluster.metadata.MappingMetaData;
+import org.elasticsearch.cluster.metadata.IndexAbstraction;
+import org.elasticsearch.cluster.metadata.IndexMetadata;
+import org.elasticsearch.cluster.metadata.MappingMetadata;
+import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.common.CheckedSupplier;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
+import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.plugins.MapperPlugin;
@@ -97,18 +100,20 @@ public class ElasticsearchMappings {
     private ElasticsearchMappings() {
     }
 
-    static String[] mappingRequiresUpdate(ClusterState state, String[] concreteIndices, Version minVersion) throws IOException {
+    static String[] mappingRequiresUpdate(ClusterState state, String[] concreteIndices, Version minVersion) {
         List<String> indicesToUpdate = new ArrayList<>();
 
-        ImmutableOpenMap<String, MappingMetaData> currentMapping = state.metaData().findMappings(concreteIndices,
-                MapperPlugin.NOOP_FIELD_FILTER);
+        ImmutableOpenMap<String, MappingMetadata> currentMapping = state.metadata().findMappings(concreteIndices,
+                MapperPlugin.NOOP_FIELD_FILTER,
+                Metadata.ON_NEXT_INDEX_FIND_MAPPINGS_NOOP
+        );
 
         for (String index : concreteIndices) {
-            MappingMetaData metaData = currentMapping.get(index);
-            if (metaData != null) {
+            MappingMetadata metadata = currentMapping.get(index);
+            if (metadata != null) {
                 try {
                     @SuppressWarnings("unchecked")
-                    Map<String, Object> meta = (Map<String, Object>) metaData.sourceAsMap().get("_meta");
+                    Map<String, Object> meta = (Map<String, Object>) metadata.sourceAsMap().get("_meta");
                     if (meta != null) {
                         String versionString = (String) meta.get("version");
                         if (versionString == null) {
@@ -146,29 +151,25 @@ public class ElasticsearchMappings {
 
     public static void addDocMappingIfMissing(String alias,
                                               CheckedSupplier<String, IOException> mappingSupplier,
-                                              Client client, ClusterState state, ActionListener<Boolean> listener) {
-        AliasOrIndex aliasOrIndex = state.metaData().getAliasAndIndexLookup().get(alias);
-        if (aliasOrIndex == null) {
+                                              Client client, ClusterState state, TimeValue masterNodeTimeout,
+                                              ActionListener<Boolean> listener) {
+        IndexAbstraction indexAbstraction = state.metadata().getIndicesLookup().get(alias);
+        if (indexAbstraction == null) {
             // The index has never been created yet
             listener.onResponse(true);
             return;
         }
-        String[] concreteIndices = aliasOrIndex.getIndices().stream().map(IndexMetaData::getIndex).map(Index::getName)
+        String[] concreteIndices = indexAbstraction.getIndices().stream().map(IndexMetadata::getIndex).map(Index::getName)
             .toArray(String[]::new);
 
-        String[] indicesThatRequireAnUpdate;
-        try {
-            indicesThatRequireAnUpdate = mappingRequiresUpdate(state, concreteIndices, Version.CURRENT);
-        } catch (IOException e) {
-            listener.onFailure(e);
-            return;
-        }
-
+        final String[] indicesThatRequireAnUpdate = mappingRequiresUpdate(state, concreteIndices, Version.CURRENT);
         if (indicesThatRequireAnUpdate.length > 0) {
             try {
                 String mapping = mappingSupplier.get();
                 PutMappingRequest putMappingRequest = new PutMappingRequest(indicesThatRequireAnUpdate);
                 putMappingRequest.source(mapping, XContentType.JSON);
+                putMappingRequest.origin(ML_ORIGIN);
+                putMappingRequest.masterNodeTimeout(masterNodeTimeout);
                 executeAsyncWithOrigin(client, ML_ORIGIN, PutMappingAction.INSTANCE, putMappingRequest,
                     ActionListener.wrap(response -> {
                         if (response.isAcknowledged()) {

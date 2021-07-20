@@ -1,20 +1,9 @@
 /*
- * Licensed to Elasticsearch under one or more contributor
- * license agreements. See the NOTICE file distributed with
- * this work for additional information regarding copyright
- * ownership. Elasticsearch licenses this file to you under
- * the Apache License, Version 2.0 (the "License"); you may
- * not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0 and the Server Side Public License, v 1; you may not use this file except
+ * in compliance with, at your election, the Elastic License 2.0 or the Server
+ * Side Public License, v 1.
  */
 
 package org.elasticsearch.search.aggregations.support;
@@ -22,14 +11,17 @@ package org.elasticsearch.search.aggregations.support;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.search.aggregations.AggregationExecutionException;
 import org.elasticsearch.search.aggregations.Aggregator;
+import org.elasticsearch.search.aggregations.Aggregator.BucketComparator;
 import org.elasticsearch.search.aggregations.InternalAggregations;
 import org.elasticsearch.search.aggregations.bucket.SingleBucketAggregator;
 import org.elasticsearch.search.aggregations.metrics.NumericMetricsAggregator;
 import org.elasticsearch.search.profile.aggregation.ProfilingAggregator;
+import org.elasticsearch.search.sort.SortOrder;
 
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * A path that can be used to sort/order buckets (in some multi-bucket aggregations, e.g. terms &amp; histogram) based on
@@ -130,10 +122,7 @@ public class AggregationPath {
 
             PathElement token = (PathElement) o;
 
-            if (key != null ? !key.equals(token.key) : token.key != null) return false;
-            if (!name.equals(token.name)) return false;
-
-            return true;
+            return Objects.equals(key, token.key) && Objects.equals(name, token.name);
         }
 
         @Override
@@ -182,11 +171,6 @@ public class AggregationPath {
         return stringPathElements;
     }
 
-    private AggregationPath subPath(int offset, int length) {
-        List<PathElement> subTokens = new ArrayList<>(pathElements.subList(offset, offset + length));
-        return new AggregationPath(subTokens);
-    }
-
     /**
      * Looks up the value of this path against a set of aggregation results.
      */
@@ -223,23 +207,27 @@ public class AggregationPath {
         return aggregator;
     }
 
-    /**
-     * Validates this path over the given aggregator as a point of reference.
-     *
-     * @param root The point of reference of this path
-     * @throws AggregationExecutionException on validation error
-     */
-    public void validate(Aggregator root) throws AggregationExecutionException {
-        try {
-            resolveAggregator(root).validateSortPathKey(lastPathElement().key);
-        } catch (IllegalArgumentException e) {
-            throw new AggregationExecutionException("Invalid aggregation order path [" + this + "]. " + e.getMessage(), e);
-        }
+    public BucketComparator bucketComparator(Aggregator root, SortOrder order) {
+        return resolveAggregator(root).bucketComparator(lastPathElement().key, order);
     }
 
     private static String[] split(String toSplit, int index, String[] result) {
         result[0] = toSplit.substring(0, index);
         result[1] = toSplit.substring(index + 1);
         return result;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        AggregationPath other = (AggregationPath) obj;
+        return pathElements.equals(other.pathElements);
+    }
+
+    @Override
+    public int hashCode() {
+        return pathElements.hashCode();
     }
 }

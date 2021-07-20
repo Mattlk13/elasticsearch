@@ -67,7 +67,7 @@ analyzer produces the following tokens:
 [ quick, fox ]
 ------
 
-To execute the serach, {es} compares these query string tokens to the tokens
+To execute the search, {es} compares these query string tokens to the tokens
 indexed in the `text` field.
 
 [options="header"]
@@ -81,7 +81,7 @@ indexed in the `text` field.
 |`dog`     |              | X
 |===
 
-Because the field value are query string were analyzed in the same way, they
+Because the field value and query string were analyzed in the same way, they
 created similar tokens. The tokens `quick` and `fox` are exact matches. This
 means the search matches the document containing `"The QUICK brown foxes jumped
 over the dog!"`, just as the user expects.

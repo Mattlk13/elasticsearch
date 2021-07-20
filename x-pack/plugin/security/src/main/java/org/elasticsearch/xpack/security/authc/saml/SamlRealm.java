@@ -1,7 +1,8 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License;
- * you may not use this file except in compliance with the Elastic License.
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
  */
 package org.elasticsearch.xpack.security.authc.saml;
 
@@ -19,15 +20,15 @@ import org.elasticsearch.ElasticsearchSecurityException;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.SpecialPermission;
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.common.CheckedRunnable;
+import org.elasticsearch.core.CheckedRunnable;
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.SuppressForbidden;
-import org.elasticsearch.common.collect.Tuple;
-import org.elasticsearch.common.lease.Releasable;
-import org.elasticsearch.common.lease.Releasables;
+import org.elasticsearch.core.SuppressForbidden;
+import org.elasticsearch.core.Tuple;
+import org.elasticsearch.core.Releasable;
+import org.elasticsearch.core.Releasables;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.SettingsException;
-import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.common.util.set.Sets;
@@ -152,6 +153,7 @@ public final class SamlRealm extends Realm implements Releasable {
     private final SamlLogoutRequestHandler logoutHandler;
     private final UserRoleMapper roleMapper;
 
+    private final SamlLogoutResponseHandler logoutResponseHandler;
     private final Supplier<EntityDescriptor> idpDescriptor;
 
     private final SpConfiguration serviceProvider;
@@ -195,8 +197,11 @@ public final class SamlRealm extends Realm implements Releasable {
         final SamlAuthenticator authenticator = new SamlAuthenticator(clock, idpConfiguration, serviceProvider, maxSkew);
         final SamlLogoutRequestHandler logoutHandler =
                 new SamlLogoutRequestHandler(clock, idpConfiguration, serviceProvider, maxSkew);
+        final SamlLogoutResponseHandler logoutResponseHandler =
+            new SamlLogoutResponseHandler(clock, idpConfiguration, serviceProvider, maxSkew);
 
-        final SamlRealm realm = new SamlRealm(config, roleMapper, authenticator, logoutHandler, idpDescriptor, serviceProvider);
+        final SamlRealm realm = new SamlRealm(config, roleMapper, authenticator, logoutHandler,
+            logoutResponseHandler, idpDescriptor, serviceProvider);
 
         // the metadata resolver needs to be destroyed since it runs a timer task in the background and destroying stops it!
         realm.releasables.add(() -> metadataResolver.destroy());
@@ -204,14 +209,25 @@ public final class SamlRealm extends Realm implements Releasable {
         return realm;
     }
 
+    public SpConfiguration getServiceProvider() {
+        return serviceProvider;
+    }
+
     // For testing
-    SamlRealm(RealmConfig config, UserRoleMapper roleMapper, SamlAuthenticator authenticator, SamlLogoutRequestHandler logoutHandler,
-              Supplier<EntityDescriptor> idpDescriptor, SpConfiguration spConfiguration) throws Exception {
+    SamlRealm(
+        RealmConfig config,
+        UserRoleMapper roleMapper,
+        SamlAuthenticator authenticator,
+        SamlLogoutRequestHandler logoutHandler,
+        SamlLogoutResponseHandler logoutResponseHandler,
+        Supplier<EntityDescriptor> idpDescriptor,
+        SpConfiguration spConfiguration) throws Exception {
         super(config);
 
         this.roleMapper = roleMapper;
         this.authenticator = authenticator;
         this.logoutHandler = logoutHandler;
+        this.logoutResponseHandler = logoutResponseHandler;
 
         this.idpDescriptor = idpDescriptor;
         this.serviceProvider = spConfiguration;
@@ -467,8 +483,10 @@ public final class SamlRealm extends Realm implements Releasable {
         final String name = resolveSingleValueAttribute(attributes, nameAttribute, NAME_ATTRIBUTE.name(config));
         final String mail = resolveSingleValueAttribute(attributes, mailAttribute, MAIL_ATTRIBUTE.name(config));
         UserRoleMapper.UserData userData = new UserRoleMapper.UserData(principal, dn, groups, userMeta, config);
+        logger.debug("SAML attribute mapping = [{}]", userData);
         roleMapper.resolveRoles(userData, ActionListener.wrap(roles -> {
             final User user = new User(principal, roles.toArray(new String[roles.size()]), name, mail, userMeta, true);
+            logger.debug("SAML user = [{}]", user);
             wrappedListener.onResponse(AuthenticationResult.success(user));
         }, wrappedListener::onFailure));
     }
@@ -656,7 +674,7 @@ public final class SamlRealm extends Realm implements Releasable {
                 .forceAuthn(forceAuthn)
                 .build();
         if (logger.isTraceEnabled()) {
-            logger.trace("Constructed SAML Authentication Request: {}", SamlUtils.samlObjectToString(authnRequest));
+            logger.trace("Constructed SAML Authentication Request: {}", SamlUtils.getXmlContent(authnRequest, true));
         }
         return authnRequest;
     }
@@ -672,7 +690,7 @@ public final class SamlRealm extends Realm implements Releasable {
             final LogoutRequest logoutRequest = new SamlLogoutRequestMessageBuilder(
                     Clock.systemUTC(), serviceProvider, idpDescriptor.get(), nameId, session).build();
             if (logoutRequest != null && logger.isTraceEnabled()) {
-                logger.trace("Constructed SAML Logout Request: {}", SamlUtils.samlObjectToString(logoutRequest));
+                logger.trace("Constructed SAML Logout Request: {}", SamlUtils.getXmlContent(logoutRequest, true));
             }
             return logoutRequest;
         } else {
@@ -688,7 +706,7 @@ public final class SamlRealm extends Realm implements Releasable {
         final LogoutResponse logoutResponse = new SamlLogoutResponseBuilder(
                 Clock.systemUTC(), serviceProvider, idpDescriptor.get(), inResponseTo, StatusCode.SUCCESS).build();
         if (logoutResponse != null && logger.isTraceEnabled()) {
-            logger.trace("Constructed SAML Logout Response: {}", SamlUtils.samlObjectToString(logoutResponse));
+            logger.trace("Constructed SAML Logout Response: {}", SamlUtils.getXmlContent(logoutResponse, true));
         }
         return logoutResponse;
     }
@@ -699,6 +717,10 @@ public final class SamlRealm extends Realm implements Releasable {
 
     public SamlLogoutRequestHandler getLogoutHandler() {
         return this.logoutHandler;
+    }
+
+    public SamlLogoutResponseHandler getLogoutResponseHandler() {
+        return logoutResponseHandler;
     }
 
     private static class FileListener implements FileChangesListener {
@@ -741,7 +763,15 @@ public final class SamlRealm extends Realm implements Releasable {
         }
 
         List<String> getAttribute(SamlAttributes attributes) {
-            return parser.apply(attributes);
+            final List<String> attrValue = parser.apply(attributes);
+            logger.trace(
+                () -> new ParameterizedMessage(
+                    "Parser [{}] generated values [{}]",
+                    name,
+                    Strings.collectionToCommaDelimitedString(attrValue)
+                )
+            );
+            return attrValue;
         }
 
         @Override

@@ -1,26 +1,16 @@
 /*
- * Licensed to Elasticsearch under one or more contributor
- * license agreements. See the NOTICE file distributed with
- * this work for additional information regarding copyright
- * ownership. Elasticsearch licenses this file to you under
- * the Apache License, Version 2.0 (the "License"); you may
- * not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0 and the Server Side Public License, v 1; you may not use this file except
+ * in compliance with, at your election, the Elastic License 2.0 or the Server
+ * Side Public License, v 1.
  */
 
 package org.elasticsearch.search;
 
 import com.carrotsearch.randomizedtesting.RandomizedContext;
 import com.carrotsearch.randomizedtesting.annotations.TimeoutSuite;
+
 import org.apache.lucene.search.join.ScoreMode;
 import org.apache.lucene.util.TimeUnits;
 import org.elasticsearch.action.ActionListener;
@@ -85,6 +75,7 @@ import org.elasticsearch.search.suggest.phrase.PhraseSuggestionBuilder;
 import org.elasticsearch.search.suggest.term.TermSuggestion;
 import org.elasticsearch.search.suggest.term.TermSuggestionBuilder;
 import org.elasticsearch.test.NotEqualMessageBuilder;
+import org.elasticsearch.test.hamcrest.ElasticsearchAssertions;
 import org.elasticsearch.test.rest.ESRestTestCase;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -124,7 +115,7 @@ public class CCSDuelIT extends ESRestTestCase {
 
     private static final String INDEX_NAME = "ccs_duel_index";
     private static final String REMOTE_INDEX_NAME = "my_remote_cluster:" + INDEX_NAME;
-    private static final String[] TAGS = new String[]{"java", "xml", "sql", "html", "php", "ruby", "python", "perl"};
+    private static final String[] TAGS = new String[] {"java", "xml", "sql", "html", "php", "ruby", "python", "perl"};
 
     private static RestHighLevelClient restHighLevelClient;
 
@@ -158,6 +149,11 @@ public class CCSDuelIT extends ESRestTestCase {
 
     @Override
     protected boolean preserveIndicesUponCompletion() {
+        return true;
+    }
+
+    @Override
+    protected boolean preserveDataStreamsUponCompletion() {
         return true;
     }
 
@@ -199,7 +195,7 @@ public class CCSDuelIT extends ESRestTestCase {
                 public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
                     throw new AssertionError("Failed to execute bulk", failure);
                 }
-            }).build();
+            }, "CCSDuelIT").build();
 
         int numQuestions = randomIntBetween(50, 100);
         for (int i = 0; i < numQuestions; i++) {
@@ -212,8 +208,7 @@ public class CCSDuelIT extends ESRestTestCase {
         assertTrue(bulkProcessor.awaitClose(30, TimeUnit.SECONDS));
 
         RefreshResponse refreshResponse = restHighLevelClient.indices().refresh(new RefreshRequest(INDEX_NAME), RequestOptions.DEFAULT);
-        assertEquals(0, refreshResponse.getFailedShards());
-        assertEquals(numShards, refreshResponse.getSuccessfulShards());
+        ElasticsearchAssertions.assertNoFailures(refreshResponse);
     }
 
     private static IndexRequest buildIndexRequest(String id, String type, String questionId) {
@@ -435,6 +430,8 @@ public class CCSDuelIT extends ESRestTestCase {
     public void testSortByFieldOneClusterHasNoResults() throws Exception {
         assumeMultiClusterSetup();
         SearchRequest searchRequest = initSearchRequest();
+        // set to a value greater than the number of shards to avoid differences due to the skipping of shards
+        searchRequest.setPreFilterShardSize(128);
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         boolean onlyRemote = randomBoolean();
         sourceBuilder.query(new TermQueryBuilder("_index", onlyRemote ? REMOTE_INDEX_NAME : INDEX_NAME));
@@ -522,31 +519,32 @@ public class CCSDuelIT extends ESRestTestCase {
     private static SearchSourceBuilder buildTermsAggsSource() {
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         sourceBuilder.size(0);
-        TermsAggregationBuilder cluster = new TermsAggregationBuilder("cluster123", ValueType.STRING);
+        TermsAggregationBuilder cluster = new TermsAggregationBuilder("cluster123").userValueTypeHint(ValueType.STRING);
         cluster.field("_index");
-        TermsAggregationBuilder type = new TermsAggregationBuilder("type", ValueType.STRING);
+        TermsAggregationBuilder type = new TermsAggregationBuilder("type").userValueTypeHint(ValueType.STRING);
         type.field("type.keyword");
         type.showTermDocCountError(true);
         type.order(BucketOrder.key(true));
         cluster.subAggregation(type);
         sourceBuilder.aggregation(cluster);
 
-        TermsAggregationBuilder tags = new TermsAggregationBuilder("tags", ValueType.STRING);
+        TermsAggregationBuilder tags = new TermsAggregationBuilder("tags").userValueTypeHint(ValueType.STRING);
         tags.field("tags.keyword");
         tags.showTermDocCountError(true);
         tags.size(100);
         sourceBuilder.aggregation(tags);
 
-        TermsAggregationBuilder tags2 = new TermsAggregationBuilder("tags", ValueType.STRING);
+        TermsAggregationBuilder tags2 = new TermsAggregationBuilder("tags").userValueTypeHint(ValueType.STRING);
         tags2.field("tags.keyword");
         tags.subAggregation(tags2);
 
         FilterAggregationBuilder answers = new FilterAggregationBuilder("answers", new TermQueryBuilder("type", "answer"));
-        TermsAggregationBuilder answerPerQuestion = new TermsAggregationBuilder("answer_per_question", ValueType.STRING);
+        TermsAggregationBuilder answerPerQuestion = new TermsAggregationBuilder("answer_per_question")
+            .userValueTypeHint(ValueType.STRING);
         answerPerQuestion.showTermDocCountError(true);
         answerPerQuestion.field("questionId.keyword");
         answers.subAggregation(answerPerQuestion);
-        TermsAggregationBuilder answerPerUser = new TermsAggregationBuilder("answer_per_user", ValueType.STRING);
+        TermsAggregationBuilder answerPerUser = new TermsAggregationBuilder("answer_per_user").userValueTypeHint(ValueType.STRING);
         answerPerUser.field("user.keyword");
         answerPerUser.size(30);
         answerPerUser.showTermDocCountError(true);
@@ -561,7 +559,7 @@ public class CCSDuelIT extends ESRestTestCase {
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         sourceBuilder.size(0);
         searchRequest.source(sourceBuilder);
-        TermsAggregationBuilder tags = new TermsAggregationBuilder("tags", ValueType.STRING);
+        TermsAggregationBuilder tags = new TermsAggregationBuilder("tags").userValueTypeHint(ValueType.STRING);
         tags.field("tags.keyword");
         tags.showTermDocCountError(true);
         DateHistogramAggregationBuilder creation = new DateHistogramAggregationBuilder("creation");
@@ -578,7 +576,7 @@ public class CCSDuelIT extends ESRestTestCase {
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         sourceBuilder.size(0);
         searchRequest.source(sourceBuilder);
-        CardinalityAggregationBuilder tags = new CardinalityAggregationBuilder("tags", ValueType.STRING);
+        CardinalityAggregationBuilder tags = new CardinalityAggregationBuilder("tags").userValueTypeHint(ValueType.STRING);
         tags.field("tags.keyword");
         sourceBuilder.aggregation(tags);
         duelSearch(searchRequest, CCSDuelIT::assertAggs);
@@ -617,7 +615,7 @@ public class CCSDuelIT extends ESRestTestCase {
         topHits.size(10);
         topHits.sort("creationDate", SortOrder.DESC);
         topHits.sort("id", SortOrder.ASC);
-        TermsAggregationBuilder tags = new TermsAggregationBuilder("tags", ValueType.STRING);
+        TermsAggregationBuilder tags = new TermsAggregationBuilder("tags").userValueTypeHint(ValueType.STRING);
         tags.field("tags.keyword");
         tags.size(10);
         tags.subAggregation(topHits);
